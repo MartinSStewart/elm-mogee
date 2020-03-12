@@ -1,5 +1,6 @@
-module Main exposing (main)
+port module Main exposing (main)
 
+import Audio
 import Browser
 import Browser.Dom exposing (getViewport)
 import Browser.Events
@@ -13,6 +14,7 @@ import Browser.Events
 import Components.Gamepad as Gamepad
 import Html.Events exposing (keyCode)
 import Json.Decode as Decode exposing (Value)
+import Json.Encode as JE
 import Messages exposing (Msg(..))
 import Model exposing (Model)
 import Ports exposing (gamepad)
@@ -34,7 +36,7 @@ subscriptions _ =
         ]
 
 
-init : Value -> ( Model, Cmd Msg )
+init : Value -> ( Model, Cmd Msg, Audio.AudioCmd Msg )
 init _ =
     ( Model.initial
     , Cmd.batch
@@ -43,14 +45,23 @@ init _ =
         , Font.load FontLoaded
         , Task.perform (\{ viewport } -> Resize (round viewport.width) (round viewport.height)) getViewport
         ]
+    , Audio.cmdNone
     )
 
 
-main : Program Value Model Msg
+port toJS : JE.Value -> Cmd msg
+
+
+port fromJS : (Decode.Value -> msg) -> Sub msg
+
+
+main : Program Value (Audio.Model Msg Model) (Audio.Msg Msg)
 main =
-    Browser.element
+    Audio.elementWithAudio
         { init = init
         , view = View.view
         , subscriptions = subscriptions
         , update = Model.update
+        , audio = always Audio.silence
+        , audioPort = { toJS = toJS, fromJS = fromJS }
         }

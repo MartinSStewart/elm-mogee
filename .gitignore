@@ -2,3 +2,5 @@ elm-stuff
 elm.js
 .DS_Store
 dest
+/.idea
+/node_modules

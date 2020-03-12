@@ -5,6 +5,7 @@ module Model exposing
     , update
     )
 
+import Audio
 import Browser.Events exposing (Visibility(..))
 import Components.Components as Components exposing (Components)
 import Components.Gamepad as Gamepad
@@ -60,12 +61,13 @@ initial =
     }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg, Audio.AudioCmd Msg )
 update action model =
     case action of
         Resize w h ->
             ( { model | size = ( w, h ) }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         Animate elapsed ->
@@ -89,30 +91,35 @@ update action model =
                             model.padding
               }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         GamepadChange gamepad_ ->
             ( { model | keys = Keys.gamepadChange gamepad_ model.keys }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         TextureLoaded texture ->
             ( { model | texture = Result.toMaybe texture }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         SpriteLoaded sprite ->
             ( { model | sprite = Result.toMaybe sprite }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         FontLoaded font ->
             ( { model | font = Result.toMaybe font }
             , Cmd.none
+            , Audio.cmdNone
             )
 
         VisibilityChange Visible ->
-            ( model, Cmd.none )
+            ( model, Cmd.none, Audio.cmdNone )
 
         VisibilityChange Hidden ->
             ( { model
@@ -124,6 +131,7 @@ update action model =
                         model.state
               }
             , Cmd.none
+            , Audio.cmdNone
             )
 
 
@@ -184,10 +192,11 @@ animate elapsed model =
                 ( model, Cmd.none )
 
 
-animateKeys : Float -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+animateKeys : Float -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg, Audio.AudioCmd Msg )
 animateKeys elapsed ( model, cmd ) =
     ( { model | keys = Keys.animate elapsed model.keys }
     , cmd
+    , Audio.cmdNone
     )
 
 
