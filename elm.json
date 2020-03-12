@@ -17,15 +17,15 @@
             "elm-explorations/linear-algebra": "1.0.3",
             "elm-explorations/webgl": "1.1.1",
             "kuzminadya/mogeefont": "2.0.1",
-            "mgold/elm-animation": "2.0.0"
+            "mgold/elm-animation": "2.0.0",
+            "pzp1997/assoc-list": "1.0.0"
         },
         "indirect": {
             "elm/url": "1.0.0",
             "elm/virtual-dom": "1.0.2",
             "elm-community/list-extra": "8.2.3",
             "ianmackenzie/elm-units": "2.3.0",
-            "mgold/elm-nonempty-list": "4.1.0",
-            "pzp1997/assoc-list": "1.0.0"
+            "mgold/elm-nonempty-list": "4.1.0"
         }
     },
     "test-dependencies": {

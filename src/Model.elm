@@ -1,10 +1,12 @@
 module Model exposing
-    ( GameState(..)
+    ( BaseModel(..)
+    , GameState(..)
     , Model
     , initial
     , update
     )
 
+import AssocList
 import Audio
 import Browser.Events exposing (Visibility(..))
 import Components.Components as Components exposing (Components)
@@ -15,6 +17,7 @@ import Messages exposing (Msg(..))
 import Ports exposing (play, sound, stop)
 import Slides.Engine as Engine exposing (Engine)
 import Slides.Slides as Slides
+import Sounds exposing (Sounds)
 import Systems.Systems as Systems exposing (Systems)
 import WebGL.Texture exposing (Error, Texture)
 
@@ -40,11 +43,18 @@ type alias Model =
     , font : Maybe Texture
     , keys : Keys
     , slides : Engine
+    , sounds : Sounds.LoadedSounds
     }
 
 
-initial : Model
-initial =
+type BaseModel
+    = SoundsLoading (AssocList.Dict Sounds Audio.Source)
+    | SoundsLoaded Model
+    | SoundsDidNotLoad
+
+
+initial : Sounds.LoadedSounds -> Model
+initial loadedSounds =
     { components = Components.initial
     , systems = Systems.initial
     , lives = 0
@@ -58,16 +68,16 @@ initial =
     , sprite = Nothing
     , keys = Keys.initial
     , slides = Slides.initial
+    , sounds = loadedSounds
     }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, Audio.AudioCmd Msg )
+update : Msg -> Model -> ( Model, Cmd Msg )
 update action model =
     case action of
         Resize w h ->
             ( { model | size = ( w, h ) }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         Animate elapsed ->
@@ -91,35 +101,30 @@ update action model =
                             model.padding
               }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         GamepadChange gamepad_ ->
             ( { model | keys = Keys.gamepadChange gamepad_ model.keys }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         TextureLoaded texture ->
             ( { model | texture = Result.toMaybe texture }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         SpriteLoaded sprite ->
             ( { model | sprite = Result.toMaybe sprite }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         FontLoaded font ->
             ( { model | font = Result.toMaybe font }
             , Cmd.none
-            , Audio.cmdNone
             )
 
         VisibilityChange Visible ->
-            ( model, Cmd.none, Audio.cmdNone )
+            ( model, Cmd.none )
 
         VisibilityChange Hidden ->
             ( { model
@@ -131,7 +136,6 @@ update action model =
                         model.state
               }
             , Cmd.none
-            , Audio.cmdNone
             )
 
 
@@ -192,11 +196,10 @@ animate elapsed model =
                 ( model, Cmd.none )
 
 
-animateKeys : Float -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg, Audio.AudioCmd Msg )
+animateKeys : Float -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
 animateKeys elapsed ( model, cmd ) =
     ( { model | keys = Keys.animate elapsed model.keys }
     , cmd
-    , Audio.cmdNone
     )
 
 
