@@ -6,6 +6,9 @@
     "url": "https://github.com/MartinSStewart/elm-mogee.git",
     "type": "git"
   },
+  "scripts": {
+    "start": "export ELM_DEBUGGER=false && elm-app start"
+  },
   "author": "<MartinSStewart@gmail.com>",
   "license": "MIT",
   "dependencies": {

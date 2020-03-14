@@ -10,10 +10,10 @@ Submitted to the [\#LOWREZJAM 2016](https://unsoundscapes.itch.io/mogee).
 
 ## Instructions to run
 
-1. Install elm [elm-lang.org/install](http://elm-lang.org/install)
+1. Install yarn
 2. Clone this repo
-3. Run `elm make src/Main.elm --output elm.js`
-4. Open `index.html` in the browser
+3. Run `yarn install`
+4. If you're on Mac or Linux: Run `yarn start`. If you're on Windows, `set ELM_DEBUGGER=false && yarn run elm-app start`.
 
 ## Special Credits
 

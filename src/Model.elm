@@ -15,10 +15,12 @@ import Components.Components as Components exposing (Components)
 import Components.Gamepad as Gamepad
 import Components.Keys as Keys exposing (Keys, codes)
 import Components.Menu as Menu exposing (Menu)
+import Maybe exposing (Maybe(..))
 import Messages exposing (BaseMsg(..), LoadingMsg_(..), Msg(..))
 import Slides.Engine as Engine exposing (Engine)
 import Slides.Slides as Slides
 import Sounds exposing (Sounds)
+import Systems.Mogee as Mogee
 import Systems.Systems as Systems exposing (Systems)
 import Task
 import Time
@@ -48,6 +50,9 @@ type alias Model =
     , keys : Keys
     , slides : Engine
     , soundData : Sounds.LoadedSounds
+    , menuLastAction : Maybe Time.Posix
+    , lastWallHit : Maybe Time.Posix
+    , lastJump : Maybe Time.Posix
     }
 
 
@@ -83,6 +88,9 @@ initial loadedSounds texture font sprite size time =
     , keys = Keys.initial
     , slides = Slides.initial
     , soundData = loadedSounds
+    , menuLastAction = Nothing
+    , lastWallHit = Nothing
+    , lastJump = Nothing
     }
 
 
@@ -147,8 +155,9 @@ handleLoadingComplete model =
     of
         ( Just allSounds, Just texture, ( Just font, Just sprite ) ) ->
             ( LoadingModel model
-            , Time.now
-                |> Task.perform (LoadingCompleted { sounds = allSounds, texture = texture, font = font, sprite = sprite })
+            , Task.perform
+                (LoadingCompleted { sounds = allSounds, texture = texture, font = font, sprite = sprite })
+                Time.now
             )
 
         _ ->
@@ -220,7 +229,7 @@ animate elapsed model =
                 limitElapsed =
                     min elapsed 60
 
-                ( newComponents, newSystems ) =
+                ( newComponents, newSystems, soundEvent ) =
                     Systems.run
                         limitElapsed
                         (Keys.directions model.keys)
@@ -240,6 +249,20 @@ animate elapsed model =
                             | components = newComponents
                             , systems = newSystems
                             , state = state
+                            , lastWallHit =
+                                case soundEvent of
+                                    Just Mogee.Wall ->
+                                        Just model.time
+
+                                    _ ->
+                                        model.lastWallHit
+                            , lastJump =
+                                case soundEvent of
+                                    Just Mogee.Jump ->
+                                        Just model.time
+
+                                    _ ->
+                                        model.lastJump
                         }
             in
             newState
@@ -309,19 +332,19 @@ updateMenu elapsed menuState playingStart menu model =
     in
     case cmd of
         Menu.Start ->
-            start { newModel | state = Initial newMenu }
+            start { newModel | state = Initial newMenu, menuLastAction = Just model.time }
 
         Menu.ToggleSound on ->
-            { newModel | sound = on, state = Initial newMenu }
+            { newModel | sound = on, state = Initial newMenu, menuLastAction = Just model.time }
 
         Menu.Resume ->
-            { newModel | state = Playing { playingStart = playingStart } }
+            { newModel | state = Playing { playingStart = playingStart }, menuLastAction = Just model.time }
 
         Menu.End ->
-            { newModel | state = Initial Menu.start }
+            { newModel | state = Initial Menu.start, menuLastAction = Just model.time }
 
         Menu.Action ->
-            { newModel | state = menuState newMenu }
+            { newModel | state = menuState newMenu, menuLastAction = Just model.time }
 
         Menu.Noop ->
             { newModel | state = menuState newMenu }

@@ -20,7 +20,7 @@ initial =
     }
 
 
-run : Float -> { x : Float, y : Float } -> Components -> Systems -> ( Components, Systems )
+run : Float -> { x : Float, y : Float } -> Components -> Systems -> ( Components, Systems, Maybe Mogee.SoundEvent )
 run elapsed keys components { screens, currentScore } =
     let
         ( components1, newScreens ) =
@@ -35,4 +35,5 @@ run elapsed keys components { screens, currentScore } =
     , { screens = newScreens
       , currentScore = CurrentScore.run components2 currentScore
       }
+    , sound
     )

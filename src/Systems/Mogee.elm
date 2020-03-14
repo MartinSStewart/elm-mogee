@@ -1,4 +1,4 @@
-module Systems.Mogee exposing (run)
+module Systems.Mogee exposing (SoundEvent(..), run)
 
 import Components.Components as Components exposing (Components)
 import Components.Mogee as Mogee exposing (Mogee)
@@ -27,7 +27,12 @@ walkVelocity =
     0.045
 
 
-moveY : Float -> Float -> List Transform -> Transform -> Velocity -> ( Transform, Velocity, Maybe String )
+type SoundEvent
+    = Jump
+    | Wall
+
+
+moveY : Float -> Float -> List Transform -> Transform -> Velocity -> ( Transform, Velocity, Maybe SoundEvent )
 moveY dt dy wallsTransforms originalTransform originalVelocity =
     List.foldl
         (\wall ( transform, velocity, audio ) ->
@@ -37,7 +42,7 @@ moveY dt dy wallsTransforms originalTransform originalVelocity =
                     ( { transform | y = wall.y + wall.height }
                     , { velocity | vy = 0 }
                     , if velocity.vy < -0.05 then
-                        Just "wall"
+                        Just Wall
 
                       else
                         audio
@@ -55,10 +60,10 @@ moveY dt dy wallsTransforms originalTransform originalVelocity =
                                 0
                       }
                     , if dy == 1 then
-                        Just "jump"
+                        Just Jump
 
                       else if velocity.vy > 0.05 then
-                        Just "wall"
+                        Just Wall
 
                       else
                         Nothing
@@ -128,7 +133,7 @@ moveX dt dx wallsTransforms originalTransform originalVelocity =
 
 {-| TODO: Split physics into its own system
 -}
-run : Float -> { x : Float, y : Float } -> Components -> ( Components, Maybe String )
+run : Float -> { x : Float, y : Float } -> Components -> ( Components, Maybe SoundEvent )
 run elapsed { x, y } components =
     let
         wallsTransforms =

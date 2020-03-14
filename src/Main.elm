@@ -2,8 +2,6 @@ port module Main exposing (main)
 
 import AssocList
 import Audio exposing (Audio)
-import Browser
-import Browser.Dom exposing (getViewport)
 import Browser.Events exposing (onAnimationFrame, onKeyDown, onKeyUp, onResize, onVisibilityChange)
 import Components.Gamepad as Gamepad
 import Duration
@@ -15,7 +13,6 @@ import Model exposing (BaseModel(..), GameState(..), LoadingModel_, Model)
 import Ports exposing (gamepad)
 import Quantity
 import Sounds
-import Task exposing (Task)
 import View
 import View.Font as Font
 import View.Sprite as Sprite
@@ -111,24 +108,29 @@ audio baseModel =
 
         LoadedModel model ->
             if model.sound then
-                case model.state of
-                    Paused { playingStart, menu } ->
-                        Audio.audioWithConfig
-                            { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
-                            model.soundData.theme
-                            playingStart
+                Audio.group
+                    [ case model.state of
+                        Paused { playingStart, menu } ->
+                            Audio.audioWithConfig
+                                { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
+                                model.soundData.theme
+                                playingStart
 
-                    Playing { playingStart } ->
-                        Audio.audioWithConfig
-                            { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
-                            model.soundData.theme
-                            playingStart
+                        Playing { playingStart } ->
+                            Audio.audioWithConfig
+                                { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
+                                model.soundData.theme
+                                playingStart
 
-                    Dead { deathStart } ->
-                        Audio.audio model.soundData.death deathStart
+                        Dead { deathStart } ->
+                            Audio.audio model.soundData.death deathStart
 
-                    Initial menu ->
-                        Audio.silence
+                        Initial _ ->
+                            Audio.silence
+                    , model.menuLastAction |> Maybe.map (Audio.audio model.soundData.action) |> Maybe.withDefault Audio.silence
+                    , model.lastWallHit |> Maybe.map (Audio.audio model.soundData.wall) |> Maybe.withDefault Audio.silence
+                    , model.lastJump |> Maybe.map (Audio.audio model.soundData.jump) |> Maybe.withDefault Audio.silence
+                    ]
 
             else
                 Audio.silence
