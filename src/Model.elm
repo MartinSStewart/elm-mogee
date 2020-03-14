@@ -1,9 +1,11 @@
 module Model exposing
     ( BaseModel(..)
     , GameState(..)
+    , LoadingModel_
     , Model
     , initial
     , update
+    , updateLoading
     )
 
 import AssocList
@@ -13,80 +15,160 @@ import Components.Components as Components exposing (Components)
 import Components.Gamepad as Gamepad
 import Components.Keys as Keys exposing (Keys, codes)
 import Components.Menu as Menu exposing (Menu)
-import Messages exposing (Msg(..))
-import Ports exposing (play, sound, stop)
+import Messages exposing (BaseMsg(..), LoadingMsg_(..), Msg(..))
 import Slides.Engine as Engine exposing (Engine)
 import Slides.Slides as Slides
 import Sounds exposing (Sounds)
 import Systems.Systems as Systems exposing (Systems)
+import Task
+import Time
 import WebGL.Texture exposing (Error, Texture)
 
 
 type GameState
-    = Paused Menu
-    | Playing
-    | Dead
+    = Paused { playingStart : Time.Posix, menu : Menu }
+    | Playing { playingStart : Time.Posix }
+    | Dead { deathStart : Time.Posix }
     | Initial Menu
 
 
 type alias Model =
     { systems : Systems
     , components : Components
+    , time : Time.Posix
     , state : GameState
     , lives : Int
     , score : Int
     , size : ( Int, Int )
     , padding : Int
     , sound : Bool
+    , texture : Texture
+    , sprite : Texture
+    , font : Texture
+    , keys : Keys
+    , slides : Engine
+    , soundData : Sounds.LoadedSounds
+    }
+
+
+type alias LoadingModel_ =
+    { sounds : AssocList.Dict Sounds Audio.Source
     , texture : Maybe Texture
     , sprite : Maybe Texture
     , font : Maybe Texture
-    , keys : Keys
-    , slides : Engine
-    , sounds : Sounds.LoadedSounds
+    , size : ( Int, Int )
     }
 
 
 type BaseModel
-    = SoundsLoading (AssocList.Dict Sounds Audio.Source)
-    | SoundsLoaded Model
-    | SoundsDidNotLoad
+    = LoadingModel LoadingModel_
+    | LoadedModel Model
+    | FailedToLoad
 
 
-initial : Sounds.LoadedSounds -> Model
-initial loadedSounds =
+initial : Sounds.LoadedSounds -> Texture -> Texture -> Texture -> ( Int, Int ) -> Time.Posix -> Model
+initial loadedSounds texture font sprite size time =
     { components = Components.initial
     , systems = Systems.initial
+    , time = time
     , lives = 0
     , score = 0
     , state = Initial Menu.start
-    , size = ( 0, 0 )
+    , size = size
     , padding = 0
     , sound = True
-    , texture = Nothing
-    , font = Nothing
-    , sprite = Nothing
+    , texture = texture
+    , font = font
+    , sprite = sprite
     , keys = Keys.initial
     , slides = Slides.initial
-    , sounds = loadedSounds
+    , soundData = loadedSounds
     }
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update action model =
-    case action of
-        Resize w h ->
-            ( { model | size = ( w, h ) }
-            , Cmd.none
+updateLoading : LoadingMsg_ -> LoadingModel_ -> ( BaseModel, Cmd BaseMsg )
+updateLoading msg model =
+    case msg of
+        AudioLoaded sound result ->
+            case result of
+                Ok audioSource ->
+                    { model | sounds = AssocList.insert sound audioSource model.sounds }
+                        |> handleLoadingComplete
+
+                Err _ ->
+                    ( FailedToLoad, Cmd.none )
+
+        TextureLoaded result ->
+            case result of
+                Ok texture ->
+                    { model | texture = Just texture } |> handleLoadingComplete
+
+                Err _ ->
+                    ( FailedToLoad, Cmd.none )
+
+        SpriteLoaded result ->
+            case result of
+                Ok sprite ->
+                    { model | sprite = Just sprite } |> handleLoadingComplete
+
+                Err _ ->
+                    ( FailedToLoad, Cmd.none )
+
+        FontLoaded result ->
+            case result of
+                Ok font ->
+                    { model | font = Just font } |> handleLoadingComplete
+
+                Err _ ->
+                    ( FailedToLoad, Cmd.none )
+
+
+handleLoadingComplete : LoadingModel_ -> ( BaseModel, Cmd BaseMsg )
+handleLoadingComplete model =
+    let
+        map : Sounds.Sounds -> Maybe (Audio.Source -> b) -> Maybe b
+        map sound_ constructor =
+            case AssocList.get sound_ model.sounds of
+                Just audioSource_ ->
+                    constructor |> Maybe.andThen (\c -> c audioSource_ |> Just)
+
+                Nothing ->
+                    Nothing
+    in
+    case
+        ( map Sounds.Wall (Just Sounds.LoadedSounds)
+            |> map Sounds.Theme
+            |> map Sounds.Jump
+            |> map Sounds.Death
+            |> map Sounds.Action
+        , model.texture
+        , ( model.font, model.sprite )
+        )
+    of
+        ( Just allSounds, Just texture, ( Just font, Just sprite ) ) ->
+            ( LoadingModel model
+            , Time.now
+                |> Task.perform (LoadingCompleted { sounds = allSounds, texture = texture, font = font, sprite = sprite })
             )
 
-        Animate elapsed ->
-            model
+        _ ->
+            ( LoadingModel model, Cmd.none )
+
+
+update : Msg -> Model -> Model
+update action model =
+    case action of
+        Animate time ->
+            let
+                elapsed =
+                    Time.posixToMillis time - Time.posixToMillis model.time |> toFloat
+            in
+            { model | time = time }
                 |> animate elapsed
                 |> animateKeys elapsed
 
         KeyChange pressed keyCode ->
-            ( { model
+            { model
                 | keys = Keys.keyChange pressed keyCode model.keys
                 , padding =
                     -- resize the vieport with `-` and `=`
@@ -99,61 +181,46 @@ update action model =
 
                         _ ->
                             model.padding
-              }
-            , Cmd.none
-            )
+            }
 
         GamepadChange gamepad_ ->
-            ( { model | keys = Keys.gamepadChange gamepad_ model.keys }
-            , Cmd.none
-            )
-
-        TextureLoaded texture ->
-            ( { model | texture = Result.toMaybe texture }
-            , Cmd.none
-            )
-
-        SpriteLoaded sprite ->
-            ( { model | sprite = Result.toMaybe sprite }
-            , Cmd.none
-            )
-
-        FontLoaded font ->
-            ( { model | font = Result.toMaybe font }
-            , Cmd.none
-            )
+            { model | keys = Keys.gamepadChange gamepad_ model.keys }
 
         VisibilityChange Visible ->
-            ( model, Cmd.none )
+            model
 
         VisibilityChange Hidden ->
-            ( { model
+            { model
                 | state =
-                    if model.state == Playing then
-                        Paused Menu.paused
+                    case model.state of
+                        Playing { playingStart } ->
+                            Paused { playingStart = playingStart, menu = Menu.paused }
 
-                    else
-                        model.state
-              }
-            , Cmd.none
-            )
+                        _ ->
+                            model.state
+            }
 
 
-animate : Float -> Model -> ( Model, Cmd Msg )
+animate : Float -> Model -> Model
 animate elapsed model =
     case model.state of
         Initial menu ->
-            updateMenu elapsed Initial menu model
+            updateMenu elapsed Initial model.time menu model
 
-        Paused menu ->
-            updateMenu elapsed Paused menu model
+        Paused paused ->
+            updateMenu
+                elapsed
+                (\menu -> Paused { playingStart = paused.playingStart, menu = menu })
+                paused.playingStart
+                paused.menu
+                model
 
-        Playing ->
+        Playing { playingStart } ->
             let
                 limitElapsed =
                     min elapsed 60
 
-                ( newComponents, newSystems, sound_ ) =
+                ( newComponents, newSystems ) =
                     Systems.run
                         limitElapsed
                         (Keys.directions model.keys)
@@ -162,12 +229,12 @@ animate elapsed model =
 
                 state =
                     if Keys.pressed codes.escape model.keys || Keys.pressed codes.q model.keys then
-                        Paused Menu.paused
+                        Paused { playingStart = playingStart, menu = Menu.paused }
 
                     else
                         model.state
 
-                ( newState, cmd ) =
+                newState =
                     checkLives
                         { model
                             | components = newComponents
@@ -175,75 +242,60 @@ animate elapsed model =
                             , state = state
                         }
             in
-            ( newState
-            , case sound_ of
-                Just snd ->
-                    Cmd.batch [ cmd, play snd ]
+            newState
 
-                Nothing ->
-                    cmd
-            )
-
-        Dead ->
+        Dead _ ->
             if Keys.pressed codes.enter model.keys then
                 if model.lives == 0 then
-                    ( { model | state = Initial Menu.start }, Cmd.none )
+                    { model | state = Initial Menu.start }
 
                 else
                     continue model
 
             else
-                ( model, Cmd.none )
+                model
 
 
-animateKeys : Float -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-animateKeys elapsed ( model, cmd ) =
-    ( { model | keys = Keys.animate elapsed model.keys }
-    , cmd
-    )
+animateKeys : Float -> Model -> Model
+animateKeys elapsed model =
+    { model | keys = Keys.animate elapsed model.keys }
 
 
-checkLives : Model -> ( Model, Cmd Msg )
+checkLives : Model -> Model
 checkLives model =
     if Components.isDead model.components then
-        ( { model
+        { model
             | lives = model.lives - 1
-            , state = Dead
-          }
-        , Cmd.batch [ play "death", stop "theme" ]
-        )
+            , state = Dead { deathStart = model.time }
+        }
 
     else
-        ( model, Cmd.none )
+        model
 
 
-continue : Model -> ( Model, Cmd Msg )
+continue : Model -> Model
 continue model =
-    ( { model
-        | state = Playing
+    { model
+        | state = Playing { playingStart = model.time }
         , components = Components.initial
         , systems = Systems.initial
         , score = model.score + model.systems.currentScore
-      }
-    , Cmd.batch [ play "action", play "theme" ]
-    )
+    }
 
 
-start : Model -> ( Model, Cmd Msg )
+start : Model -> Model
 start model =
-    ( { model
-        | state = Playing
+    { model
+        | state = Playing { playingStart = model.time }
         , components = Components.initial
         , systems = Systems.initial
         , lives = 3
         , score = 0
-      }
-    , Cmd.batch [ play "action", play "theme" ]
-    )
+    }
 
 
-updateMenu : Float -> (Menu -> GameState) -> Menu -> Model -> ( Model, Cmd Msg )
-updateMenu elapsed menuState menu model =
+updateMenu : Float -> (Menu -> GameState) -> Time.Posix -> Menu -> Model -> Model
+updateMenu elapsed menuState playingStart menu model =
     let
         ( newMenu, cmd ) =
             Menu.update elapsed model.sound model.keys menu
@@ -260,30 +312,16 @@ updateMenu elapsed menuState menu model =
             start { newModel | state = Initial newMenu }
 
         Menu.ToggleSound on ->
-            ( { newModel | sound = on, state = Initial newMenu }
-            , if on then
-                Cmd.batch [ sound on, play "action" ]
-
-              else
-                sound on
-            )
+            { newModel | sound = on, state = Initial newMenu }
 
         Menu.Resume ->
-            ( { newModel | state = Playing }
-            , play "action"
-            )
+            { newModel | state = Playing { playingStart = playingStart } }
 
         Menu.End ->
-            ( { newModel | state = Initial Menu.start }
-            , Cmd.batch [ stop "theme", play "action" ]
-            )
+            { newModel | state = Initial Menu.start }
 
         Menu.Action ->
-            ( { newModel | state = menuState newMenu }
-            , play "action"
-            )
+            { newModel | state = menuState newMenu }
 
         Menu.Noop ->
-            ( { newModel | state = menuState newMenu }
-            , Cmd.none
-            )
+            { newModel | state = menuState newMenu }

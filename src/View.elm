@@ -6,8 +6,8 @@ import Components.Menu as Menu
 import Components.Transform as Transform exposing (Transform)
 import Html exposing (Html, div)
 import Html.Attributes exposing (height, style, width)
-import Messages exposing (Msg)
-import Model exposing (GameState(..), Model)
+import Messages exposing (BaseMsg, Msg)
+import Model exposing (BaseModel(..), GameState(..), Model)
 import Slides.View as Slides
 import View.Color as Color
 import View.Common as Common
@@ -19,41 +19,44 @@ import WebGL exposing (Entity)
 import WebGL.Texture exposing (Texture)
 
 
-view : Model -> Html Msg
-view model =
-    let
-        ( w, h ) =
-            model.size
+view : BaseModel -> Html BaseMsg
+view baseModel =
+    case baseModel of
+        LoadingModel _ ->
+            Html.text ""
 
-        size =
-            max 1 (min w h // 64 - model.padding) * 64
-    in
-    WebGL.toHtmlWith
-        [ WebGL.depth 1
-        , WebGL.stencil 0
-        , WebGL.clearColor (22 / 255) (17 / 255) (22 / 255) 0
-        ]
-        [ width size
-        , height size
-        , style "display" "block"
-        , style "position" "absolute"
-        , style "top" "50%"
-        , style "left" "50%"
-        , style "margin-top" (String.fromInt (-size // 2) ++ "px")
-        , style "margin-left" (String.fromInt (-size // 2) ++ "px")
-        , style "image-rendering" "optimizeSpeed"
-        , style "image-rendering" "-moz-crisp-edges"
-        , style "image-rendering" "-webkit-optimize-contrast"
-        , style "image-rendering" "crisp-edges"
-        , style "image-rendering" "pixelated"
-        , style "-ms-interpolation-mode" "nearest-neighbor"
-        ]
-        (Maybe.map3 (render model)
-            model.texture
-            model.font
-            model.sprite
-            |> Maybe.withDefault []
-        )
+        FailedToLoad ->
+            Html.text "A texture or sound effect failed to load. :("
+
+        LoadedModel model ->
+            let
+                ( w, h ) =
+                    model.size
+
+                size =
+                    max 1 (min w h // 64 - model.padding) * 64
+            in
+            WebGL.toHtmlWith
+                [ WebGL.depth 1
+                , WebGL.stencil 0
+                , WebGL.clearColor (22 / 255) (17 / 255) (22 / 255) 0
+                ]
+                [ width size
+                , height size
+                , style "display" "block"
+                , style "position" "absolute"
+                , style "top" "50%"
+                , style "left" "50%"
+                , style "margin-top" (String.fromInt (-size // 2) ++ "px")
+                , style "margin-left" (String.fromInt (-size // 2) ++ "px")
+                , style "image-rendering" "optimizeSpeed"
+                , style "image-rendering" "-moz-crisp-edges"
+                , style "image-rendering" "-webkit-optimize-contrast"
+                , style "image-rendering" "crisp-edges"
+                , style "image-rendering" "pixelated"
+                , style "-ms-interpolation-mode" "nearest-neighbor"
+                ]
+                (render model)
 
 
 toMinimap : Transform -> Transform
@@ -65,26 +68,26 @@ toMinimap { x, y } =
     }
 
 
-render : Model -> Texture -> Texture -> Texture -> List Entity
-render model texture font sprite =
+render : Model -> List Entity
+render model =
     case model.state of
         Initial menu ->
             if menu.section == Menu.SlidesSection then
-                Slides.render sprite font model.slides
+                Slides.render model.sprite model.font model.slides
 
             else
-                Menu.render model.sound font sprite menu
+                Menu.render model.sound model.font model.sprite menu
 
-        Paused menu ->
-            Menu.render model.sound font sprite menu
-                ++ renderGame model texture font sprite
+        Paused { menu } ->
+            Menu.render model.sound model.font model.sprite menu
+                ++ renderGame model model.texture model.font model.sprite
 
-        Dead ->
-            Font.render Color.white continueText font ( 12, 40, 0 )
-                :: renderGame model texture font sprite
+        Dead _ ->
+            Font.render Color.white continueText model.font ( 12, 40, 0 )
+                :: renderGame model model.texture model.font model.sprite
 
-        Playing ->
-            renderGame model texture font sprite
+        Playing _ ->
+            renderGame model model.texture model.font model.sprite
 
 
 renderGame : Model -> Texture -> Texture -> Texture -> List Entity

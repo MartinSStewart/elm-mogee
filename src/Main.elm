@@ -1,24 +1,19 @@
 port module Main exposing (main)
 
 import AssocList
-import Audio
+import Audio exposing (Audio)
 import Browser
 import Browser.Dom exposing (getViewport)
-import Browser.Events
-    exposing
-        ( onAnimationFrameDelta
-        , onKeyDown
-        , onKeyUp
-        , onResize
-        , onVisibilityChange
-        )
+import Browser.Events exposing (onAnimationFrame, onKeyDown, onKeyUp, onResize, onVisibilityChange)
 import Components.Gamepad as Gamepad
+import Duration
 import Html.Events exposing (keyCode)
-import Json.Decode as Decode exposing (Value)
+import Json.Decode as Decode
 import Json.Encode as JE
-import Messages exposing (BaseMsg(..), Msg(..))
-import Model exposing (BaseModel(..), Model)
+import Messages exposing (BaseMsg(..), LoadingMsg_(..), Msg(..))
+import Model exposing (BaseModel(..), GameState(..), LoadingModel_, Model)
 import Ports exposing (gamepad)
+import Quantity
 import Sounds
 import Task exposing (Task)
 import View
@@ -26,92 +21,139 @@ import View.Font as Font
 import View.Sprite as Sprite
 
 
-subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch
-        [ onAnimationFrameDelta Animate
-        , onKeyDown (Decode.map (KeyChange True) keyCode)
-        , onKeyUp (Decode.map (KeyChange False) keyCode)
-        , onResize Resize
-        , onVisibilityChange VisibilityChange
-        , gamepad (Gamepad.fromJson >> GamepadChange)
-        ]
+subscriptions : BaseModel -> Sub BaseMsg
+subscriptions baseModel =
+    case baseModel of
+        LoadingModel _ ->
+            onResize Resize
+
+        LoadedModel _ ->
+            Sub.batch
+                [ Sub.batch
+                    [ onAnimationFrame Animate
+                    , onKeyDown (Decode.map (KeyChange True) keyCode)
+                    , onKeyUp (Decode.map (KeyChange False) keyCode)
+                    , onVisibilityChange VisibilityChange
+                    , gamepad (Gamepad.fromJson >> GamepadChange)
+                    ]
+                    |> Sub.map LoadedMsg
+                , onResize Resize
+                ]
+
+        FailedToLoad ->
+            Sub.none
 
 
-init : Value -> ( BaseModel, Cmd BaseMsg, Audio.AudioCmd BaseMsg )
-init _ =
-    ( SoundsLoading AssocList.empty
+init : Flags -> ( BaseModel, Cmd BaseMsg, Audio.AudioCmd BaseMsg )
+init flags =
+    ( LoadingModel
+        { sounds = AssocList.empty
+        , texture = Nothing
+        , font = Nothing
+        , sprite = Nothing
+        , size = ( flags.windowWidth, flags.windowHeight )
+        }
     , Cmd.batch
         [ Sprite.loadTexture TextureLoaded
         , Sprite.loadSprite SpriteLoaded
         , Font.load FontLoaded
-        , Task.perform (\{ viewport } -> Resize (round viewport.width) (round viewport.height)) getViewport
         ]
+        |> Cmd.map LoadingMsg
     , Audio.cmdBatch
-        [ Audio.loadAudio AudioLoaded "assets/sound.ogg"
+        [ Audio.loadAudio (AudioLoaded Sounds.Wall) "snd/wall.wav"
+        , Audio.loadAudio (AudioLoaded Sounds.Theme) "snd/theme.ogg"
+        , Audio.loadAudio (AudioLoaded Sounds.Jump) "snd/jump.wav"
+        , Audio.loadAudio (AudioLoaded Sounds.Death) "snd/death.ogg"
+        , Audio.loadAudio (AudioLoaded Sounds.Action) "snd/action.wav"
         ]
+        |> Audio.cmdMap LoadingMsg
     )
 
 
 update : BaseMsg -> BaseModel -> ( BaseModel, Cmd BaseMsg, Audio.AudioCmd BaseMsg )
 update msg baseModel =
     case ( msg, baseModel ) of
-        ( AudioLoaded sound result, SoundsLoading dict ) ->
-            case result of
-                Ok audioSource ->
-                    let
-                        newDict =
-                            AssocList.insert sound audioSource dict
-
-                        map : Sounds.Sounds -> Maybe (a -> b) -> Maybe b
-                        map sound_ constructor =
-                            case AssocList.get sound_ newDict of
-                                Just audioSource_ ->
-                                    constructor |> Maybe.andThen (\c -> c audioSource_ |> Just)
-
-                                Nothing ->
-                                    Nothing
-                    in
-                    case
-                        map Sounds.Wall (Just Sounds.LoadedSounds)
-                            |> map Sounds.Theme
-                            |> map Sounds.Jump
-                            |> map Sounds.Death
-                            |> map Sounds.Action
-                    of
-                        Just allSounds ->
-                            ( Model.initial allSounds |> SoundsLoaded, Cmd.none, Audio.cmdNone )
-
-                        Nothing ->
-                            ( SoundsLoading newDict, Cmd.none, Audio.cmdNone )
-
-                Err _ ->
-                    ( SoundsDidNotLoad, Cmd.none, Audio.cmdNone )
-
-        ( SoundsLoadedMsg msg_, SoundsLoaded model ) ->
+        ( LoadingMsg msg_, LoadingModel model ) ->
             let
                 ( newModel, newCmd ) =
-                    Model.update msg_ model
+                    Model.updateLoading msg_ model
             in
-            ( SoundsLoaded newModel, Cmd.map SoundsLoadedMsg newCmd, Audio.cmdNone )
+            ( newModel, newCmd, Audio.cmdNone )
 
-        ( _, SoundsDidNotLoad ) ->
-            ( SoundsDidNotLoad, Cmd.none, Audio.cmdNone )
+        ( LoadedMsg msg_, LoadedModel model ) ->
+            ( Model.update msg_ model |> LoadedModel, Cmd.none, Audio.cmdNone )
+
+        ( Resize width height, LoadingModel model ) ->
+            ( LoadingModel { model | size = ( width, height ) }, Cmd.none, Audio.cmdNone )
+
+        ( Resize width height, LoadedModel model ) ->
+            ( LoadedModel { model | size = ( width, height ) }, Cmd.none, Audio.cmdNone )
+
+        ( LoadingCompleted { sounds, texture, font, sprite } time, LoadingModel model ) ->
+            ( Model.initial sounds texture font sprite model.size time |> LoadedModel
+            , Cmd.none
+            , Audio.cmdNone
+            )
+
+        _ ->
+            ( baseModel, Cmd.none, Audio.cmdNone )
 
 
-port toJS : JE.Value -> Cmd msg
+audio : BaseModel -> Audio
+audio baseModel =
+    let
+        default =
+            Audio.audioDefaultConfig
+    in
+    case baseModel of
+        LoadingModel _ ->
+            Audio.silence
+
+        LoadedModel model ->
+            if model.sound then
+                case model.state of
+                    Paused { playingStart, menu } ->
+                        Audio.audioWithConfig
+                            { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
+                            model.soundData.theme
+                            playingStart
+
+                    Playing { playingStart } ->
+                        Audio.audioWithConfig
+                            { default | loop = Just { loopStart = Quantity.zero, loopEnd = Duration.seconds 46.8 } }
+                            model.soundData.theme
+                            playingStart
+
+                    Dead { deathStart } ->
+                        Audio.audio model.soundData.death deathStart
+
+                    Initial menu ->
+                        Audio.silence
+
+            else
+                Audio.silence
+
+        FailedToLoad ->
+            Audio.silence
 
 
-port fromJS : (Decode.Value -> msg) -> Sub msg
+port audioPortToJS : JE.Value -> Cmd msg
 
 
-main : Program Value (Audio.Model Msg BaseModel) (Audio.Msg Msg)
+port audioPortFromJS : (Decode.Value -> msg) -> Sub msg
+
+
+type alias Flags =
+    { windowWidth : Int, windowHeight : Int }
+
+
+main : Audio.Program Flags BaseModel BaseMsg
 main =
     Audio.elementWithAudio
         { init = init
         , view = View.view
         , subscriptions = subscriptions
-        , update = Model.update
-        , audio = always Audio.silence
-        , audioPort = { toJS = toJS, fromJS = fromJS }
+        , update = update
+        , audio = audio
+        , audioPort = { toJS = audioPortToJS, fromJS = audioPortFromJS }
         }
